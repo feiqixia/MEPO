@@ -1,0 +1,190 @@
+# Importing necessary libraries
+import numpy as np
+from sklearn.datasets import load_breast_cancer
+from sklearn.model_selection import train_test_split
+from sklearn.ensemble import AdaBoostClassifier
+from lightgbm import LGBMClassifier
+from catboost import CatBoostClassifier
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.ensemble import GradientBoostingClassifier
+from sklearn.naive_bayes import GaussianNB
+from sklearn.linear_model import LogisticRegression
+from sklearn import svm
+from sklearn.preprocessing import StandardScaler
+from sklearn.metrics import roc_auc_score, f1_score
+import pandas as pd
+from imblearn.over_sampling import SMOTE
+from sklearn import metrics
+from xgboost import XGBClassifier
+
+class Ensemble:
+    def __init__(self):
+        self.x_train = None
+        self.x_test = None
+        self.y_train = None
+        self.y_test = None
+        self.k = 5
+        self.fs_dt = np.zeros(20)  # Select features for Decision Tree
+        self.fs_svm = np.zeros(20)  # Select features for SVM
+        self.fs_knn = np.zeros(20)  # Select features for KNN
+
+    def getFeature(self):
+        dt_indices = [2, 3, 6, 7, 14]
+        svm_indices = [1, 7]
+        knn_indices = [2, 3, 6, 7, 14]
+        for idx in dt_indices:
+            self.fs_dt[idx] = 1
+            self.fs_svm[idx] = 1
+            self.fs_knn[idx] = 1
+        for idx in svm_indices:
+            self.fs_dt[idx] = 1
+            self.fs_svm[idx] = 1
+            self.fs_knn[idx] = 1
+        for idx in knn_indices:
+            self.fs_dt[idx] = 1
+            self.fs_svm[idx] = 1
+            self.fs_knn[idx] = 1
+
+    # Load dataset
+    def load_data(self):
+        df = pd.read_csv('./data/xerces-1.4.csv').iloc[:, 3:24]
+        x_data = df.drop('bug', axis=1).values
+        x_data = StandardScaler().fit_transform(x_data)
+        df[df['bug'] != 0] = 1
+        y_data = df['bug'].values
+        # Balance the dataset
+        self.x_train, self.x_test, self.y_train, self.y_test = train_test_split(x_data, y_data, test_size=0.3, random_state=42)
+        self.x_train, self.y_train = SMOTE(random_state=42).fit_resample(X=self.x_train, y=self.y_train)  # Oversampling
+
+    # Build stacking ensemble model
+    def StackingClassifier(self):
+        # Define weak learners
+        weak_learners = [('dt', DecisionTreeClassifier(random_state=32)),
+                         ('svm', svm.SVC(random_state=32)),
+                         ('knn', KNeighborsClassifier())]
+        # Final learner or meta model
+        final_learner = LogisticRegression()
+
+        train_meta_model = None
+        test_meta_model = None
+
+        # Start stacking
+        for clf_id, clf in weak_learners:
+            # Predictions for each classifier based on k-fold
+            predictions_clf = self.k_fold_cross_validation(clf, clf_id)
+
+            # Predictions for test set for each classifier based on training of level 0
+            test_predictions_clf = self.train_level_0(clf, clf_id)
+            print('Model: {}, AUC: {}'.format(clf_id, metrics.roc_auc_score(self.y_test, test_predictions_clf)))
+            # Stack predictions which will form
+            # the input data for the meta model
+            if isinstance(train_meta_model, np.ndarray):
+                train_meta_model = np.vstack((train_meta_model, predictions_clf))
+            else:
+                train_meta_model = predictions_clf
+
+            # Stack predictions from the test set
+            # which will form test data for the meta model
+            if isinstance(test_meta_model, np.ndarray):
+                test_meta_model = np.vstack((test_meta_model, test_predictions_clf))
+            else:
+                test_meta_model = test_predictions_clf
+
+        # Transpose train_meta_model
+        train_meta_model = train_meta_model.T
+
+        # Transpose test_meta_model
+        test_meta_model = test_meta_model.T
+
+        # Training level 1
+        self.train_level_1(final_learner, train_meta_model, test_meta_model)
+
+    # K-fold cross-validation
+    def k_fold_cross_validation(self, clf, clf_id):
+        predictions_clf = None
+
+        # Number of samples per fold
+        batch_size = int(len(self.x_train) / self.k)
+
+        # Start k-fold cross-validation
+        for fold in range(self.k):
+            # Settings for each batch_size
+            if fold == (self.k - 1):
+                test = self.x_train[(batch_size * fold):, :]
+                batch_start = batch_size * fold
+                batch_finish = self.x_train.shape[0]
+            else:
+                test = self.x_train[(batch_size * fold): (batch_size * (fold + 1)), :]
+                batch_start = batch_size * fold
+                batch_finish = batch_size * (fold + 1)
+
+            # test & training samples for each fold iteration
+            fold_x_test = self.x_train[batch_start:batch_finish, :]
+            fold_x_train = self.x_train[[index for index in range(self.x_train.shape[0]) if
+                                         index not in range(batch_start, batch_finish)], :]
+
+            # test & training targets for each fold iteration
+            fold_y_test = self.y_train[batch_start:batch_finish]
+            fold_y_train = self.y_train[
+                [index for index in range(self.x_train.shape[0]) if index not in range(batch_start, batch_finish)]]
+
+            # Fit current classifier feature selection
+            if(clf_id == 'dt'):
+                fold_x_train = fold_x_train[:, self.fs_dt == 1]
+                fold_x_test = fold_x_test[:, self.fs_dt == 1]
+            elif(clf_id == 'svm'):
+                fold_x_train = fold_x_train[:, self.fs_svm == 1]
+                fold_x_test = fold_x_test[:, self.fs_svm == 1]
+            elif(clf_id == 'knn'):
+                fold_x_train = fold_x_train[:, self.fs_knn == 1]
+                fold_x_test = fold_x_test[:, self.fs_knn == 1]
+            clf.fit(fold_x_train, fold_y_train)
+            fold_y_pred = clf.predict(fold_x_test)
+
+            # Store predictions for each fold_x_test
+            if isinstance(predictions_clf, np.ndarray):
+                predictions_clf = np.concatenate((predictions_clf, fold_y_pred))
+            else:
+                predictions_clf = fold_y_pred
+
+        return predictions_clf
+
+    # Base model training
+    def train_level_0(self, clf, clf_id):
+        # Train on the full real training set
+        if (clf_id == 'dt'):
+            x_train = self.x_train[:, self.fs_dt == 1]
+            x_test = self.x_test[:, self.fs_dt == 1]
+        elif(clf_id == 'svm'):
+            x_train = self.x_train[:, self.fs_svm == 1]
+            x_test = self.x_test[:, self.fs_svm == 1]
+        else:
+            x_train = self.x_train[:, self.fs_knn == 1]
+            x_test = self.x_test[:, self.fs_knn == 1]
+        clf.fit(x_train, self.y_train)
+        # Get predictions from full real test set
+        y_pred = clf.predict(x_test)
+
+        return y_pred
+
+    # Meta model training
+    def train_level_1(self, final_learner, train_meta_model, test_meta_model):
+        # Training is carried out with final learner or meta model
+        final_learner.fit(train_meta_model, self.y_train)
+        train_pre = final_learner.predict(train_meta_model)
+        test_pre = final_learner.predict(test_meta_model)
+        # Getting train and test accuracies from meta_model
+        f1_test = f1_score(test_pre, self.y_test, average='weighted')
+        auc_score = roc_auc_score(self.y_test, test_pre)
+        # print('Test F1 value: {}'.format(f1_test))
+        print('AUC score: {}'.format(auc_score))
+        print('MCC value: {}'.format(metrics.matthews_corrcoef(self.y_test, test_pre)))
+        print('F1 value: {}'.format(metrics.f1_score(self.y_test, test_pre)))
+
+if __name__ == "__main__":
+    ensemble = Ensemble()
+    ensemble.getFeature()
+    ensemble.load_data()
+    ensemble.StackingClassifier()
