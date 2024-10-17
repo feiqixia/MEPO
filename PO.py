@@ -1,18 +1,9 @@
 # -*- coding: utf-8 -*-
-"""
-Created on Thu Jul 16 21:59:58 2020
-
-@author: ZongSing_NB
-
-Main reference:
-https://seyedalimirjalili.com/woa
-https://doi.org/10.1016/j.advengsoft.2016.01.008
-"""
 
 import numpy as np
 import matplotlib.pyplot as plt
 from fitFunction import aucCal
-#D:维度 P:初始化种群个数 G:迭代次数 ub:变量取值上界  lb：变量取值下界
+# D: Dimension, P: Number of initial population, G: Number of iterations, ub: Upper bound of variable values, lb: Lower bound of variable values
 class PO():
     def __init__(self, fitness, D=30, P=20, G=500, ub=1, lb=0):
         self.fitness = fitness
@@ -27,43 +18,43 @@ class PO():
         self.loss_curve = np.zeros(self.G)
 
     def opt(self):
-        # 初始化
+        # Initialization
         self.X = np.random.uniform(low=self.lb, high=self.ub, size=[self.P, self.D])
-        F = np.zeros(self.P)   #存放各种子适应度函数
+        F = np.zeros(self.P)   # Store various sub-fitness functions
         # self.X = np.random.rand(self.P, self.D) * (self.ub - self.lb) + self.lb
-        # 迭代
+        # Iteration
         for g in range(self.G):
-            # 適應值計算
+            # Fitness value calculation
             for p in range(self.P):
                 F[p] = self.fitness(self.X[p,:])
-            # 更新最佳解
+            # Update the best solution
             if np.min(F) < self.gbest_F:
-                idx = F.argmin()              #存储索引值
-                self.gbest_X = self.X[idx].copy()     #存储最优解的位置
-                self.gbest_F = F.min()                #存储最优解
+                idx = F.argmin()              # Store the index value
+                self.gbest_X = self.X[idx].copy()     # Store the position of the optimal solution
+                self.gbest_F = F.min()                # Store the optimal solution
 
-            # print('第{}次迭代，最优值为:{}'.format(g, 1/(self.gbest_F+1e-10)))
-            #依据最优解求取最优值
-            # print('第{}次迭代，最优解值为:{}'.format(g, self.gbest_X))
+            # print('Iteration {}: Optimal value is:{}'.format(g, 1/(self.gbest_F+1e-10)))
+            # Calculate the optimal value based on the best solution
+            # print('Iteration {}: Optimal solution value is:{}'.format(g, self.gbest_X))
             f = self.fitness(self.gbest_X)
-            # print('第{}次迭代，依据最优解求取的最优值为:{}'.format(g, 1/(f+1e-10)))
+            # print('Iteration {}: Optimal value calculated based on the best solution is:{}'.format(g, 1/(f+1e-10)))
 
-            # print('第{}次迭代，err最优值为:{}'.format(g, self.gbest_F))
+            # print('Iteration {}: Error optimal value is:{}'.format(g, self.gbest_F))
             # auc = aucCal(self.gbest_X)
-            # print('第{}次迭代，auc最优值为:{}'.format(g, auc))
-            # 收斂曲線
-            self.loss_curve[g] = self.gbest_F     #存储各迭代次数对应的最优解曲线
+            # print('Iteration {}: AUC optimal value is:{}'.format(g, auc))
+            # Convergence curve
+            self.loss_curve[g] = self.gbest_F     # Store the optimal solution curve for each iteration
 
             for i in range(self.P):
                 St = np.random.randint(1, 5)
-                #觅食行为
+                # Foraging behavior
                 if St == 1:
                     self.X[i, :] = (self.X[i, :] - self.gbest_X) * self.Levy() + np.random.rand() * np.mean(self.X[i,:]) * (
                             1 - g / self.G) ** (2 * g / self.G)
-                #停留行为
+                # Staying behavior
                 elif St == 2:
                     self.X[i,:] = self.X[i,:] + self.gbest_X * self.Levy() + np.random.randn() * (1 - g / self.G) * np.ones(self.D)
-                #交流行为
+                # Communication behavior
                 elif St == 3:
                     H = np.random.rand()
                     if H < 0.5:
@@ -74,7 +65,7 @@ class PO():
                     self.X[i,:] = self.X[i,:] + np.random.rand() * np.cos((np.pi * g) / (2 * self.G)) * (
                             self.gbest_X - self.X[i,:]) - np.cos(np.random.rand() * np.pi) * (g / self.G) ** (2 / self.G) * (
                                           self.X[i, :] - self.gbest_X)
-                #选择最优
+                # Select the best
                 # for p in range(self.P):
                 #     F[p] = self.fitness(self.X[p, :])
                 # index = np.argsort(F)
@@ -82,7 +73,7 @@ class PO():
                 # for j in range(self.P):
                 #     self.X[j,:] = self.X[index[j],:]
 
-            # 邊界處理
+            # Boundary handling
             self.X = np.clip(self.X, self.lb, self.ub)
 
     def Levy(self):
@@ -96,10 +87,8 @@ class PO():
 
     def plot_curve(self):
         plt.figure()
-        plt.title('loss curve')
-        plt.plot(self.loss_curve, label='loss')
+        plt.title('Loss Curve')
+        plt.plot(self.loss_curve, label='Loss')
         plt.grid()
         plt.legend()
         plt.show()
-
-
